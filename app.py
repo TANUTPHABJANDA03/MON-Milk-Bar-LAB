@@ -10,8 +10,11 @@ from google.genai import types
 # ==================== UI SETUP & BRANDING ====================
 st.set_page_config(page_title="FitBite AI - Smart Order", page_icon="🥗", layout="centered")
 
+# แยกเก็บประวัติการพิมพ์แชท กับ ผลสรุปออเดอร์ เพื่อไม่ให้ข้อมูลตีกันจนค้างลูปเหลืองครับบอส
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "order_summary" not in st.session_state:
+    st.session_state.order_summary = None
 
 st.markdown("""
     <style>
@@ -29,7 +32,6 @@ TELEGRAM_CHAT_ID = st.secrets.get("TELEGRAM_CHAT_ID")
 # ==================== FUNCTION: GOOGLE SHEETS CONNECTOR ====================
 def save_to_sheets(data_list):
     try:
-        # ล็อกอินระบบออนไลน์ด้วยข้อมูลพารามิเตอร์จาก secrets ตรงๆ 
         creds_dict = {
             "type": "service_account",
             "project_id": "mon-milk-bar-ai", 
@@ -76,7 +78,6 @@ st.subheader("📋 ฟอร์มสั่งซื้ออาหาร")
 customer_name = st.text_input("👤 ชื่อลูกค้า:")
 customer_phone = st.text_input("📞 เบอร์โทร:")
 
-# เพิ่มเมนูหลัก
 mains = [
     "1. สลัดอกไก่ย่างพริกไทยดำ (119.-)", 
     "2. ข้าวไรซ์เบอร์รี่ปลากระพงนึ่ง (149.-)", 
@@ -87,7 +88,6 @@ mains = [
 ]
 selected_mains = st.multiselect("🥗 เมนูหลัก:", mains)
 
-# เพิ่มตัวเลือกเสริม
 addons = [
     "เพิ่มอกไก่ย่าง (+40.-)", 
     "เพิ่มไข่ต้ม (+15.-)", 
@@ -118,7 +118,6 @@ if st.button("🛒 ยืนยันการสั่งซื้อ"):
         
         save_to_sheets(order_list)
         
-        # [จุดที่แก้ไข] เพิ่มข้อมูลรอบจัดส่ง และ ที่อยู่จัดส่ง ลงในข้อความ Telegram เรียบร้อยครับบอส
         tg_msg = (
             f"🚀 *มีออเดอร์ใหม่เข้าค่ะบอส!*\n\n"
             f"👤 *ลูกค้า:* {customer_name}\n"
@@ -131,44 +130,67 @@ if st.button("🛒 ยืนยันการสั่งซื้อ"):
         )
         send_to_telegram(tg_msg)
         
-        prompt_data = f"ลูกค้าชื่อ {customer_name} สั่งซื้อ {', '.join(selected_mains)} ท็อปปิ้ง {', '.join(selected_addons)} แพ้อาหาร: {allergy}"
-        st.session_state.chat_history = [{"role": "user", "text": prompt_data}]
+        # ปรับปรุงโครงสร้าง Prompt บังคับเอาข้อมูลจากคลังวิเคราะห์สรุปทันที
+        prompt_data = (
+            f"สรุปรายการและโภชนาการด่วน: ลูกค้าชื่อ {customer_name} สั่งเมนูหลัก {', '.join(selected_mains)} "
+            f"ท็อปปิ้ง {addons_str} แพ้อาหาร: {allergy_str}"
+        )
+        
+        # [จุดแก้ไขสำคัญ] เรียกใช้งาน AI ตรงนี้ทันทีเพื่อเอาคำตอบไปเก็บ ป้องกันการติดลูปแช่แข็งหน้าจอ
+        if GOOGLE_API_KEY:
+            try:
+                client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+                sys_inst = f"คุณคือ FitBite AI สรุปราคา คำนวณแคลอรี่ และสารอาหารหลัก (โปรตีน, คาร์บ, ไขมัน) เป็นกรัม จากคลังข้อมูลนี้เท่านั้น:\n{get_knowledge_base()}"
+                res = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt_data,
+                    config=types.GenerateContentConfig(system_instruction=sys_inst, temperature=0.2)
+                )
+                st.session_state.order_summary = res.text
+            except Exception as e:
+                st.session_state.order_summary = f"⚠️ ไม่สามารถดึงข้อมูลโภชนาการได้ชั่วคราวเนื่องจากข้อผิดพลาดระบบคีย์ แต่บันทึกออเดอร์สำเร็จแล้วครับบอส"
+        
+        st.rerun()
 
-# ==================== AI AGENT WITH EXPONENTIAL BACKOFF ====================
+# ==================== DISPLAY AREA ====================
 st.markdown("---")
+
+# 1. แสดงผลสรุปออเดอร์และโภชนาการล่าสุด (ถ้ามีการกดสั่งซื้อ)
+if st.session_state.order_summary:
+    st.subheader("🧾 ใบเสร็จรับเงินและโภชนาการจาก AI")
+    with st.chat_message("model"):
+        st.markdown(st.session_state.order_summary)
+    st.markdown("---")
+
+# 2. ส่วนห้องแชทพูดคุยสอบถามข้อมูลเมนูอาหารทั่วไป (ทำงานแยกอิสระ ถามได้ตอบได้ไม่พังแล้วครับบอส)
 if st.session_state.chat_history:
+    st.subheader("💬 ห้องแชทสนทนากับหมอโภชนาการ FitBite")
     for msg in st.session_state.chat_history:
-        if msg["role"] == "model":
-            st.subheader("🧾 ใบเสร็จรับเงินและโภชนาการจาก AI")
-            with st.chat_message("model"): st.markdown(msg["text"])
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["text"])
 
-    if st.session_state.chat_history[-1]["role"] == "user":
-        if not GOOGLE_API_KEY:
-            st.error("❌ ไม่พบ GOOGLE_API_KEY")
-        else:
-            client = genai.Client(api_key=GOOGLE_API_KEY)
-            sys_inst = f"คุณคือ FitBite AI ผู้ช่วยนักโภชนาการ สรุปราคาและคำนวณแคลอรี่ตามข้อมูลจริงในคลังข้อมูลนี้:\n{get_knowledge_base()}"
-            
-            with st.spinner("AI กำลังวิเคราะห์ข้อมูล..."):
-                for attempt in range(3):
-                    try:
-                        res = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=st.session_state.chat_history[-1]["text"],
-                            config=types.GenerateContentConfig(system_instruction=sys_inst, temperature=0.2)
-                        )
-                        st.session_state.chat_history.append({"role": "model", "text": res.text})
-                        st.rerun()
-                        break
-                    except Exception as e:
-                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                            wait_time = 2 ** attempt
-                            st.warning(f"⚠️ ระบบเรียกใช้ข้อมูลถี่เกินไป กำลังรอคิว {wait_time} วินาที...")
-                            time.sleep(wait_time)
-                        else:
-                            st.error(f"เกิดข้อผิดพลาด: {e}")
-                            break
-
+# ส่วนรับคำสั่งพิมพ์แชทด้านล่างสุด
 if user_chat := st.chat_input("พิมพ์พูดคุยสอบถามข้อมูลเมนูอาหารเพิ่มเติมได้ที่นี่..."):
     st.session_state.chat_history.append({"role": "user", "text": user_chat})
+    
+    if GOOGLE_API_KEY:
+        try:
+            client = genai.Client(api_key=GOOGLE_API_KEY.strip())
+            sys_inst = f"คุณคือ FitBite AI ผู้ช่วยตอบคำถามโภชนาการและแนะนำเมนูอาหารให้กับลูกค้า อ้างอิงตามคลังข้อมูลร้าน:\n{get_knowledge_base()}"
+            
+            # บิวท์รูปแบบประวัติให้เข้าคู่กับโครงสร้าง SDK
+            formatted_contents = []
+            for m in st.session_state.chat_history:
+                role_tag = "user" if m["role"] == "user" else "model"
+                formatted_contents.append({"role": role_tag, "parts": [{"text": m["text"]}]})
+                
+            res = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=formatted_contents,
+                config=types.GenerateContentConfig(system_instruction=sys_inst, temperature=0.5)
+            )
+            st.session_state.chat_history.append({"role": "model", "text": res.text})
+        except Exception as e:
+            st.session_state.chat_history.append({"role": "model", "text": f"ขออภัยครับบอส เกิดข้อผิดพลาดในระบบแชท: {e}"})
+            
     st.rerun()
