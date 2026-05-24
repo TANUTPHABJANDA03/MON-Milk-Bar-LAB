@@ -1,5 +1,5 @@
 {
-  "name": "MilkLab AI Dev",
+  "name": "FitBite AI Dev",
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
   "postCreateCommand": "pip install -r requirements.txt",
   "customizations": {
