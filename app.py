@@ -76,10 +76,26 @@ st.subheader("📋 ฟอร์มสั่งซื้ออาหาร")
 customer_name = st.text_input("👤 ชื่อลูกค้า:")
 customer_phone = st.text_input("📞 เบอร์โทร:")
 
-mains = ["1. สลัดอกไก่ย่างพริกไทยดำ (119.-)", "2. ข้าวไรซ์เบอร์รี่ปลากระพงนึ่ง (149.-)", "3. พาสต้าโฮลวีทซอสเพสโต้กุ้ง (159.-)"]
+# เพิ่มเมนูหลัก
+mains = [
+    "1. สลัดอกไก่ย่างพริกไทยดำ (119.-)", 
+    "2. ข้าวไรซ์เบอร์รี่ปลากระพงนึ่ง (149.-)", 
+    "3. พาสต้าโฮลวีทซอสเพสโต้กุ้ง (159.-)",
+    "4. สเต็กแซลมอนย่างเกลือพร้อมผักเคียง (199.-)",
+    "5. ข้าวคีนัวผัดกะเพราอกไก่สับ (129.-)",
+    "6. สลัดเต้าหู้ย่างซอสเทอริยากิ (99.-)"
+]
 selected_mains = st.multiselect("🥗 เมนูหลัก:", mains)
 
-addons = ["เพิ่มอกไก่ย่าง (+40.-)", "เพิ่มไข่ต้ม (+15.-)", "เพิ่มอะโวคาโด (+35.-)"]
+# เพิ่มตัวเลือกเสริม
+addons = [
+    "เพิ่มอกไก่ย่าง (+40.-)", 
+    "เพิ่มไข่ต้ม (+15.-)", 
+    "เพิ่มอะโวคาโด (+35.-)",
+    "เพิ่มไข่ดาวน้ำ (+15.-)",
+    "เพิ่มแซลมอนย่าง (+70.-)",
+    "เพิ่มฟักทองย่าง (+20.-)"
+]
 selected_addons = st.multiselect("➕ ท็อปปิ้งเสริม:", addons)
 
 allergy = st.text_input("⚠️ อาหารที่แพ้ / ไม่กิน:")
@@ -91,15 +107,28 @@ if st.button("🛒 ยืนยันการสั่งซื้อ"):
         st.warning("กรุณากรอกข้อมูลสำคัญให้ครบถ้วนก่อนสั่งซื้อค่ะบอส!")
     else:
         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        addons_str = ", ".join(selected_addons) if selected_addons else "ไม่มี"
+        allergy_str = allergy if allergy else "ไม่มี"
+        
         order_list = [
             current_time, customer_name, customer_phone,
-            ", ".join(selected_mains), ", ".join(selected_addons) if selected_addons else "ไม่มี",
-            allergy if allergy else "ไม่มี", slot, address
+            ", ".join(selected_mains), addons_str,
+            allergy_str, slot, address
         ]
         
         save_to_sheets(order_list)
         
-        tg_msg = f"🚀 *มีออเดอร์ใหม่เข้าค่ะบอส!*\n\n👤 *ลูกค้า:* {customer_name}\n📞 *เบอร์:* {customer_phone}\n🥗 *เมนู:* {', '.join(selected_mains)}"
+        # [จุดที่แก้ไข] เพิ่มข้อมูลรอบจัดส่ง และ ที่อยู่จัดส่ง ลงในข้อความ Telegram เรียบร้อยครับบอส
+        tg_msg = (
+            f"🚀 *มีออเดอร์ใหม่เข้าค่ะบอส!*\n\n"
+            f"👤 *ลูกค้า:* {customer_name}\n"
+            f"📞 *เบอร์:* {customer_phone}\n"
+            f"🥗 *เมนูหลัก:* {', '.join(selected_mains)}\n"
+            f"➕ *ท็อปปิ้ง:* {addons_str}\n"
+            f"⚠️ *แพ้อาหาร:* {allergy_str}\n"
+            f"📦 *รอบจัดส่ง:* {slot}\n"
+            f"📍 *ที่อยู่จัดส่ง:* {address}"
+        )
         send_to_telegram(tg_msg)
         
         prompt_data = f"ลูกค้าชื่อ {customer_name} สั่งซื้อ {', '.join(selected_mains)} ท็อปปิ้ง {', '.join(selected_addons)} แพ้อาหาร: {allergy}"
